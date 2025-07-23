@@ -78,6 +78,10 @@ class HungarianMatcher(nn.Module):
         tgt_bbox = torch.cat([v["boxes"] for v in targets])
 
         # Compute the giou cost betwen boxes
+        # print('out_bbox',out_bbox)
+        # print('tgt_bbox',tgt_bbox)
+        # print("giou_out_bbox",(box_cxcywh_to_xyxy(out_bbox)))
+        # print("giou_tgt_bbox",(box_cxcywh_to_xyxy(tgt_bbox)))
         giou = generalized_box_iou(box_cxcywh_to_xyxy(out_bbox), box_cxcywh_to_xyxy(tgt_bbox))
         cost_giou = -giou
 

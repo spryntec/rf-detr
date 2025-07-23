@@ -83,9 +83,12 @@ def train_one_epoch(
     assert batch_size % args.grad_accum_steps == 0
     sub_batch_size = batch_size // args.grad_accum_steps
     print("LENGTH OF DATA LOADER:", len(data_loader))
-    for data_iter_step, (samples, targets) in enumerate(
-        metric_logger.log_every(data_loader, print_freq, header)
-    ):
+    for data_iter_step, (samples, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+
+         # Skip empty targets 
+        if targets is None or len(targets) == 0 or all(len(t["boxes"]) == 0 for t in targets):
+            print("Skipping empty targets in training loop.")
+            continue
         it = start_steps + data_iter_step
         callback_dict = {
             "step": it,
@@ -162,9 +165,14 @@ def train_one_epoch(
         )
         metric_logger.update(class_error=loss_dict_reduced["class_error"])
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+
+        outputs = None
+        losses = None
+        
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
+    breakpoint()
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
@@ -184,6 +192,10 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, arg
     coco_evaluator = CocoEvaluator(base_ds, iou_types)
 
     for samples, targets in metric_logger.log_every(data_loader, 10, header):
+         # Skip empty targets 
+        if targets is None or len(targets) == 0 or all(len(t["boxes"]) == 0 for t in targets):
+            print("Skipping empty targets in training loop.")
+            continue
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 

@@ -19,6 +19,10 @@
 """
 LW-DETR model and criterion classes
 """
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 import copy
 import math
 from typing import Callable
@@ -317,9 +321,9 @@ class SetCriterion(nn.Module):
             src_boxes = outputs['pred_boxes'][idx]
             target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
 
-            iou_targets=torch.diag(box_ops.box_iou(
-                box_ops.box_cxcywh_to_xyxy(src_boxes.detach()),
-                box_ops.box_cxcywh_to_xyxy(target_boxes))[0])
+            iou_targets=torch.diag(box_ops.rotated_box_iou(
+                box_ops.rbox_cxcywh_to_xyxy(src_boxes.detach()),
+                box_ops.rbox_cxcywh_to_xyxy(target_boxes))[0])
             pos_ious = iou_targets.clone().detach()
             # pos_ious_func = pos_ious ** 2
             pos_ious_func = pos_ious
@@ -338,9 +342,9 @@ class SetCriterion(nn.Module):
             src_boxes = outputs['pred_boxes'][idx]
             target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
 
-            iou_targets=torch.diag(box_ops.box_iou(
-                box_ops.box_cxcywh_to_xyxy(src_boxes.detach()),
-                box_ops.box_cxcywh_to_xyxy(target_boxes))[0])
+            iou_targets=torch.diag(box_ops.rotated_box_iou(
+                box_ops.rbox_cxcywh_to_xyxy(src_boxes.detach()),
+                box_ops.rbox_cxcywh_to_xyxy(target_boxes))[0])
             pos_ious = iou_targets.clone().detach()
 
             cls_iou_targets = torch.zeros((src_logits.shape[0], src_logits.shape[1],self.num_classes),
@@ -381,27 +385,89 @@ class SetCriterion(nn.Module):
         card_err = F.l1_loss(card_pred.float(), tgt_lengths.float())
         losses = {'cardinality_error': card_err}
         return losses
+    
 
-    def loss_boxes(self, outputs, targets, indices, num_boxes):
+    def loss_boxes(self, outputs, targets, indices, num_boxes, log_file='boxes_log.txt'):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
-           targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
-           The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
+        targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+        The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
         """
         assert 'pred_boxes' in outputs
         idx = self._get_src_permutation_idx(indices)
         src_boxes = outputs['pred_boxes'][idx]
         target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
 
+        # Log and save src_boxes and target_boxes
+        with open(log_file, 'a') as f:
+            f.write(f"Training iteration:\n")
+            f.write(f"src_boxes: {src_boxes.tolist()}\n")
+            f.write(f"target_boxes: {target_boxes.tolist()}\n")
+            f.write("-" * 50 + "\n")
+        
+        if len(src_boxes) == 0 or len(target_boxes) == 0:
+            return {
+                'loss_bbox': torch.tensor(0.0, device=src_boxes.device),
+                'loss_giou': torch.tensor(0.0, device=src_boxes.device)
+            }
+
         loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
 
         losses = {}
         losses['loss_bbox'] = loss_bbox.sum() / num_boxes
 
-        loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(
-            box_ops.box_cxcywh_to_xyxy(src_boxes),
-            box_ops.box_cxcywh_to_xyxy(target_boxes)))
+        if target_boxes.shape[0] == 0 and src_boxes.shape[0] == 0:
+            breakpoint()  
+        src_rboxes = box_ops.rbox_cxcywh_to_xyxy(src_boxes)
+        target_rboxes = box_ops.rbox_cxcywh_to_xyxy(target_boxes)
+        if src_rboxes.shape[0] == 0:
+            breakpoint()
+        loss_giou = 1 - torch.diag(box_ops.generalized_rotated_box_iou(
+            src_rboxes,
+            target_rboxes))
+
         losses['loss_giou'] = loss_giou.sum() / num_boxes
         return losses
+
+
+    #################
+
+    # def loss_boxes(self, outputs, targets, indices, num_boxes):
+    #     """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
+    #        targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+    #        The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
+    #     """
+    #     assert 'pred_boxes' in outputs
+    #     idx = self._get_src_permutation_idx(indices)
+    #     src_boxes = outputs['pred_boxes'][idx]
+    #     target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+
+    #     ####################
+    #     if len(src_boxes) == 0 or len(target_boxes) == 0:
+    #         return {
+    #             'loss_bbox': torch.tensor(0.0, device=src_boxes.device),
+    #             'loss_giou': torch.tensor(0.0, device=src_boxes.device)
+    #         }
+
+
+    #     loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
+
+    #     losses = {}
+    #     losses['loss_bbox'] = loss_bbox.sum() / num_boxes
+
+    #     if target_boxes.shape[0] == 0 and src_boxes.shape[0] == 0:
+    #         breakpoint()
+            
+    #     src_rboxes = box_ops.rbox_cxcywh_to_xyxy(src_boxes)
+    #     target_rboxes = box_ops.rbox_cxcywh_to_xyxy(target_boxes)
+    #     if src_rboxes.shape[0] == 0:
+    #         breakpoint()
+    #     loss_giou = 1 - torch.diag(box_ops.generalized_rotated_box_iou(
+    #         src_rboxes,
+    #         target_rboxes))
+
+    #     losses['loss_giou'] = loss_giou.sum() / num_boxes
+    #     # losses['loss_giou'] = torch.tensor(0.1, device=src_boxes.device)
+    #     return losses
 
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
@@ -439,6 +505,8 @@ class SetCriterion(nn.Module):
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
         num_boxes = sum(len(t["labels"]) for t in targets)
+        # if targets.shape[0] == 0:
+        #     breakpoint()
         if not self.sum_group_losses:
             num_boxes = num_boxes * group_detr
         num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
@@ -528,6 +596,42 @@ def position_supervised_loss(inputs, targets, num_boxes, alpha: float = 0.25, ga
         loss = alpha_t * loss
 
     return loss.mean(1).sum() / num_boxes
+
+# #test de la fonction loss_boxes
+
+
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# # Créer les tenseurs src_boxes et target_boxes
+# src_boxes = torch.tensor([[0.0, 0.0, 0.0, 0.0]], dtype=torch.float32, device=device)  
+# target_boxes = torch.tensor([[0.3, 0.3,0.3, 0.3]], dtype=torch.float32, device=device)  
+
+# outputs = {
+#     'pred_boxes': torch.tensor([[[0.3, 0.3, 0.3, 0.3]]], dtype=torch.float32, device=device)  # [batch_size=1, num_queries=1, 4]
+# }
+# targets = [
+#     {'boxes': target_boxes}  # Une seule image avec une boîte cible
+# ]
+# indices = [(torch.tensor([0], dtype=torch.long, device=device), torch.tensor([0], dtype=torch.long, device=device))]  # Correspondance 1:1
+# num_boxes = 1.0  # Nombre de boîtes cibles
+
+# # Initialiser le critère
+# criterion = SetCriterion(
+#     num_classes=1,  
+#     matcher=None,  
+#     weight_dict={'loss_bbox': 0.5, 'loss_giou': 0.25},  
+#     focal_alpha=0.25,
+#     losses=['boxes']
+# )
+
+# # Appeler la fonction loss_boxes
+# losses = criterion.loss_boxes(outputs, targets, indices, num_boxes)
+
+# # Afficher les résultats
+# print("Pertes calculées :")
+# print(f"loss_bbox: {losses['loss_bbox'].item()}")
+# print(f"loss_giou: {losses['loss_giou'].item()}")
+
 
 
 class PostProcess(nn.Module):
