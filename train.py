@@ -39,7 +39,7 @@ def main():
 
     else:
         print("Initializing RF-DETR model...")
-        model = RFDETRBase()
+        model = RFDETRBase(group_detr=1)
         history = []
 
         print(" Initializing training history...")
@@ -58,6 +58,7 @@ def main():
             lr=1e-4,
             device="cuda",
             checkpoint_interval=5,
+            group_detr=1,
             #resolution=704,
             output_dir="rfdetr_outputs_rloss",
         )
